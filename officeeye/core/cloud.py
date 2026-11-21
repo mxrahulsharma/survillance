@@ -674,7 +674,14 @@ class Uplink:
         cams = []
         for c in self._listing_fn():
             c = dict(c)
-            c["url"], c["prefilled"] = "", False
+            # the camera's ip and RTSP link are shown there, its password never
+            # leaves this PC: listing() already put *** in its place, and a save
+            # relayed back from the cloud view puts the saved one in again
+            # (rtsp.unmask). A link only suggested from another camera: none.
+            if c.get("prefilled"):
+                c["url"] = ""
+            c["url"] = rtsp.mask(c.get("url") or "")
+            c["prefilled"] = False
             cams.append(c)
         cloud = config.get("cloud")
         body = {"status": st, "cameras": cams,

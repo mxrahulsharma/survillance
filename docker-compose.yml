@@ -20,6 +20,10 @@ services:
     # only reachable from the server itself (for an existing Apache/Nginx)
     ports:
       - "127.0.0.1:${APP_PORT:-8800}:8000"
+    # what the office PC sent (records, photos, running time) survives
+    # restarts and updates - without it the server starts empty each time
+    volumes:
+      - app_data:/app/data
 
   caddy:
     image: caddy:2.8
@@ -37,5 +41,6 @@ services:
       - app
 
 volumes:
+  app_data:
   caddy_data:
   caddy_config:
