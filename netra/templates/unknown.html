@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Unknown people{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Unknown people</h1>
+    <p class="muted">Everyone the camera could not recognise: new visitors, and faces covered or turned away · {{ items|length }} on {{ day }} · each photo is deleted automatically after {{ keep_days }} days</p></div>
+  <form method="get" class="row">
+    <input type="date" name="date" value="{{ day }}" style="width:auto">
+    <button class="btn">Show</button>
+  </form>
+</div>
+{% if capture_on is defined %}
+<form method="post" action="{{ request.script_root }}/unknown/switch" class="card row mb" style="align-items:center;justify-content:space-between">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="date" value="{{ day }}">
+  <input type="hidden" name="on" value="{{ '0' if capture_on else '1' }}">
+  <div><b>Unknown detection</b> <span class="badge {{ 'b-on-time' if capture_on else 'b-absent' }}">{{ 'ON' if capture_on else 'OFF' }}</span>
+    <div class="small muted">{{ 'Photos of unknown people are being saved from both cameras.' if capture_on else 'Off: no new unknown photos are saved. Recognition and attendance keep working.' }}</div></div>
+  <button class="btn {{ 'danger' if capture_on else '' }}">{{ 'Turn OFF' if capture_on else 'Turn ON' }}</button>
+</form>
+{% endif %}
+{% if days %}<div class="chips mb">{% for d in days %}<a class="chip" href="{{ url_for('unknown_page', date=d) }}" {% if d == day %}style="border-color:var(--brand);color:var(--brand)"{% endif %}>{{ d }}</a>{% endfor %}</div>{% endif %}
+<div class="card">
+  {% if items %}
+  <form method="post" action="{{ request.script_root }}/unknown/delete" data-confirm="Delete the selected unknown photos? This cannot be undone." id="unkForm">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="date" value="{{ day }}">
+    <div class="row mb" style="justify-content:space-between">
+      <label class="row" style="gap:6px"><input type="checkbox" id="unkAll"> Select all</label>
+      <div class="row" style="gap:8px">
+        <button class="btn danger sm">Delete selected</button>
+      </div>
+    </div>
+    <div class="row" style="align-items:flex-start;gap:14px">
+      {% for p in items %}
+      <figure style="margin:0;display:grid;gap:4px;width:150px">
+        <label style="position:relative;display:block">
+          <input type="checkbox" name="ids" value="{{ p.photo }}" class="unkBox" style="position:absolute;top:8px;left:8px;width:18px;height:18px;z-index:1">
+          <img src="{{ url_for('snapshot', rel=p.photo) }}" alt="Unknown person {{ p.time }}" loading="lazy"
+               style="width:150px;height:190px;object-fit:cover;border-radius:10px;background:var(--line);cursor:zoom-in" onclick="zoom(this.src);return false">
+        </label>
+        <figcaption><b>{{ p.time }}</b><br>
+          <span class="badge b-unknown">{{ "OUT camera" if p.out else ("IN camera" if has_out else "Camera") }}</span></figcaption>
+      </figure>
+      {% endfor %}
+    </div>
+  </form>
+  <form method="post" action="{{ request.script_root }}/unknown/delete" data-confirm="Delete ALL unknown photos of {{ day }}? This cannot be undone." style="margin:12px 0 0">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="date" value="{{ day }}">
+    <input type="hidden" name="all" value="1">
+    <button class="btn ghost sm">Delete all on this day</button>
+  </form>
+  <script>
+    document.getElementById("unkAll").addEventListener("change", e => document.querySelectorAll(".unkBox").forEach(b => b.checked = e.target.checked));
+  </script>
+  {% else %}
+  <p class="empty">No unknown people on {{ day }}.</p>
+  {% endif %}
+</div>
+{% endblock %}

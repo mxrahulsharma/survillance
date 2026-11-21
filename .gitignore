@@ -1,0 +1,18 @@
+# Office data: camera links, events, photos of people, training frames.
+data/
+# Secrets: MONGO_URI and the like.
+.env
+# Models download themselves on first start (Ultralytics releases).
+*.pt
+*.ts
+runs/
+*.log
+.claude/
+__pycache__/
+*.pyc
+# NetraAttend: face models are downloaded (netra/download_models.py); its backups and logs stay on the PC.
+netra/models/*.onnx
+netra/backups/
+netra/logs/
+# Zips made for other teams (git archive)
+/*.zip

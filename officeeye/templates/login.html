@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in - OfficeEye</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icon.svg') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="OfficeEye">
+  {# opened inside the attendance frame: the login takes the whole window #}
+  <script>if (window.top !== window.self) window.top.location.href = window.location.href;</script>
+</head>
+<body class="login-page">
+  <form class="login-box" method="post" action="/login">
+    <div class="login-brand"><img class="brand-icon" src="{{ url_for('static', filename='icon.svg') }}" alt="">
+      <span>OfficeEye<small>office camera monitor</small></span></div>
+    <input type="hidden" name="next" value="{{ next }}">
+    {% if local_login %}
+    {# the office PC: the view login looks, the edit login can change things too #}
+    {% if want_edit %}<p class="login-note">Log in with the <b>edit</b> username and password to change things.</p>{% endif %}
+    <label for="user">Username</label>
+    <input id="user" name="username" autocomplete="username" autofocus required>
+    <label for="pw">Password</label>
+    <input id="pw" type="password" name="password" autocomplete="current-password" required>
+    {% if error %}<p class="login-error">{{ error }}</p>{% endif %}
+    <button class="primary" type="submit">Log in</button>
+    <p class="hint">The view login shows everything. The edit login can also change
+       settings, cameras, rules and attendance.</p>
+    {% else %}
+    <label for="user">Username</label>
+    <input id="user" name="username" autocomplete="username" autofocus required>
+    <label for="pw">Password</label>
+    <input id="pw" type="password" name="password" autocomplete="current-password" required>
+    {% if error %}<p class="login-error">{{ error }}</p>{% endif %}
+    <button class="primary" type="submit">Log in</button>
+    <p class="hint">Cloud view of the office cameras. Read only - settings are
+       changed on the office PC.</p>
+    {% endif %}
+  </form>
+</body>
+</html>

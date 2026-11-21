@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Attendance{% endblock %}
+
+{% block body %}
+{# NetraAttend's page (served at /attendance in this app) under OfficeEye's sidebar #}
+<iframe class="att-frame" id="att-frame" src="{{ frame_src }}" title="Attendance"></iframe>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// The sidebar follows the attendance page shown - also one opened by a link in it.
+const PREFIX = {{ attendance_prefix|tojson }};
+const frame = $('#att-frame');
+function markPage() {
+  let loc;
+  try { loc = frame.contentWindow.location; } catch (e) { return; }
+  const p = loc.pathname.startsWith(PREFIX) ? loc.pathname.slice(PREFIX.length) || '/' : '/';
+  let best = null;
+  $$('#att-sub a').forEach(a => {
+    const d = a.dataset.p;
+    if (p === d || (d !== '/' && p.startsWith(d)) || (d === '/' && p === '/')) {
+      if (!best || d.length > best.dataset.p.length) best = a;
+    }
+  });
+  $$('#att-sub a').forEach(a => a.classList.toggle('on', a === best));
+  try { history.replaceState(null, '', '/attendance-app?p=' + encodeURIComponent(p + loc.search)); } catch (e) {}
+}
+frame.addEventListener('load', markPage);
+</script>
+{% endblock %}

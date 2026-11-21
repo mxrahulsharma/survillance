@@ -1,0 +1,36 @@
+# One server for OfficeEye and NetraAttend (attendance): docker compose up -d --build
+#   app   = OfficeEye's cloud view at /  +  NetraAttend's website, employee panel
+#           and API at /attendance - one container, one process
+#   caddy = https in front of it, free Let's Encrypt certificate for $DOMAIN
+# The cameras stay on the office PC (OfficeEye and NetraAttend there); settings
+# in .env - see .env.example and DEPLOY_VPS.md.
+services:
+  app:
+    build: .
+    restart: always
+    env_file: .env
+    environment:
+      OFFICEEYE_MODE: cloud
+      OFFICEEYE_ATTENDANCE: "on"
+      NETRA_ROLE: web
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2.8
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:

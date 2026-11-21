@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} - OfficeEye</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icon.svg') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="OfficeEye">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><img class="brand-icon" src="{{ url_for('static', filename='icon.svg') }}" alt="">
+      <span>OfficeEye<small>office camera monitor</small></span></div>
+
+    <form class="side-search" action="/live" role="search">
+      <input type="search" name="q" value="{{ query or '' }}" maxlength="100"
+             placeholder="Search: log, laal t-shirt, botal..." aria-label="Search what the cameras see">
+    </form>
+
+    <nav>
+      <a href="/"           class="{{ 'on' if page == 'dashboard' }}">Dashboard</a>
+      {# NetraAttend: its menu here, its pages in this window (/attendance-app); without it in
+         this app (OFFICEEYE_ATTENDANCE off) a link to its own port 5000 on the office PC #}
+      {% if attendance_nav %}
+      <button type="button" class="nav-group {{ 'open here' if page == 'attendance' }}" id="att-toggle"
+              aria-expanded="{{ 'true' if page == 'attendance' else 'false' }}" aria-controls="att-sub">Attendance</button>
+      <div class="nav-sub" id="att-sub" {{ '' if page == 'attendance' else 'hidden' }}>
+        {% for p, label in attendance_nav %}<a href="{{ attendance_url }}?p={{ p }}" data-p="{{ p }}">{{ label }}</a>{% endfor %}
+      </div>
+      {% elif not cloud_mode %}
+      <a href="//{{ request.host.split(':')[0] }}:5000/">Attendance</a>
+      {% endif %}
+      <a href="/live"       class="{{ 'on' if page == 'live' }}">Live cameras</a>
+      <a href="/restricted" class="{{ 'on' if page == 'restricted' }}">Restricted area
+        <span class="badge" id="alert-badge" hidden></span></a>
+      <a href="/washroom"   class="{{ 'on' if page == 'washroom' }}">Washroom
+        <span class="badge amber" id="wash-badge" hidden></span></a>
+      <a href="/phone"      class="{{ 'on' if page == 'phone' }}">Phone use
+        <span class="badge amber" id="phone-badge" hidden></span></a>
+      <a href="/sleeping"   class="{{ 'on' if page == 'sleeping' }}">Sleeping / Head down</a>
+      <a href="/seats"      class="{{ 'on' if page == 'seats' }}">Monitoring agent</a>
+      <a href="/night"      class="{{ 'on' if page == 'night' }}">Night vision</a>
+      <a href="/parking"    class="{{ 'on' if page == 'parking' }}">Parking</a>
+      <a href="/fire"       class="{{ 'on' if page == 'fire' }}">Fire &amp; smoke
+        <span class="badge" id="fire-badge" hidden></span></a>
+      <a href="/health"     class="{{ 'on' if page == 'health' }}">Camera health
+        <span class="badge" id="health-badge" hidden></span></a>
+      <a href="/cameras"    class="{{ 'on' if page == 'cameras' }}">Cameras</a>
+      <a href="/running-time" class="{{ 'on' if page == 'running' }}">Camera running time</a>
+      <a href="/settings"   class="{{ 'on' if page == 'settings' }}">Settings</a>
+    </nav>
+
+    <div class="foot">
+      <button class="sound" id="sound" type="button"></button>
+      <button class="sound" id="install-app" type="button" hidden>Install app</button>
+      <button class="sound" id="phone-alerts" type="button" hidden>Phone alerts: off</button>
+      <div class="engine" id="engine">Detection: starting&hellip;</div>
+      <div id="clock"></div>
+      {% if cloud_mode %}<a class="logout" href="/logout">Log out</a>{% endif %}
+      {% if login_on %}
+      <div class="who">
+        {% if login_role == 'edit' %}<b>Edit login</b>
+        {% else %}<b>View only</b>
+        <a href="/login?edit=1&amp;next={{ (request.full_path.rstrip('?'))|urlencode }}">Log in to edit</a>{% endif %}
+      </div>
+      <a class="signout" href="/logout">Sign out</a>
+      {% endif %}
+    </div>
+  </aside>
+
+  <div class="content">
+    {% block body %}{% endblock %}
+  </div>
+
+  <!-- live video of one camera -->
+  <div class="modal" id="live" hidden>
+    <div class="modal-box wide">
+      <div class="modal-head">
+        <b id="live-name"></b>
+        <span class="modal-sub" id="live-info"></span>
+        <button class="ghost sm" id="live-ignore" title="Mark posters, TVs and the like that are mistaken for people">Ignore areas</button>
+        <button class="x" data-close aria-label="Close">&times;</button>
+      </div>
+      <img id="live-img" class="live-img" alt="">
+    </div>
+  </div>
+
+  <!-- ignore areas of one camera -->
+  <div class="modal" id="ignore" hidden>
+    <div class="modal-box wide">
+      <div class="modal-head">
+        <b>Ignore areas - <span id="ig-name"></span></b>
+        <button class="x" data-close aria-label="Close">&times;</button>
+      </div>
+      <p class="hint">Click around anything that gets mistaken for a person or a
+         vehicle - a poster, a TV, a mannequin, a road - corner by corner, and click
+         the first corner again to close the shape. Drag a corner to move it. Nothing
+         whose middle is inside a shape is ever counted. Click "ignored ×" on a shape to remove it.</p>
+      <div class="zone-wrap">
+        <img id="ig-img" alt="">
+        <canvas id="ig-canvas"></canvas>
+      </div>
+      <div class="row end">
+        <span class="status" id="ig-status"></span>
+        <button class="ghost" id="ig-undo">Undo point</button>
+        <button class="ghost" id="ig-clear">Clear all</button>
+        <button class="primary" id="ig-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- photo viewer -->
+  <div class="modal dark" id="lightbox" hidden>
+    <div class="lb">
+      <img id="lb-img" alt="">
+      <div class="lb-bar">
+        <button class="ghost" id="lb-prev" aria-label="Previous">&lsaquo;</button>
+        <span id="lb-cap"></span>
+        <button class="ghost" id="lb-next" aria-label="Next">&rsaquo;</button>
+        <a class="lb-dl" id="lb-dl" download>Download</a>
+        <button class="x light" data-close aria-label="Close">&times;</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+
+  <script>
+    const $ = (sel, root) => (root || document).querySelector(sel);
+    const $$ = (sel, root) => [...(root || document).querySelectorAll(sel)];
+    const api = async (url) => {
+      const res = await fetch(url);
+      if (res.status === 401) { location.href = '/login'; throw new Error('log in'); }
+      return res.json();
+    };
+    const post = async (url, body) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body || {}),
+      });
+      if (res.status === 401 || res.status === 403) {
+        // Not allowed here (the cloud-view login, or the view login): say so instead of failing quietly.
+        const r = await res.json().catch(() => ({}));
+        if (r.login) { location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search); throw new Error('log in'); }
+        const edit = '/login?edit=1&next=' + encodeURIComponent(location.pathname + location.search);
+        toast(r.edit_login
+          ? {title: 'Edit login needed', body: 'You are logged in to view only. Click here to log in with the edit username and password.',
+             kind: 'info', onclick: () => { location.href = edit; }}
+          : {title: 'Read only', body: r.message || 'Change this on the office PC.', kind: 'info'});
+        throw new Error('read only');
+      }
+      if (res.status === 503 || res.status === 504) {
+        // Cloud view: the office PC makes the change, and it is offline or slow.
+        const r = await res.json().catch(() => ({}));
+        toast({title: 'Office PC', body: r.message || 'The office PC did not answer.', kind: 'info'});
+        return r;
+      }
+      return res.json();
+    };
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c =>
+      ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+    const clock = (iso) => (iso || '').slice(11, 19);
+    const today = () => {
+      const d = new Date();
+      return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    };
+    const ago = (sec) => sec == null ? '' : sec < 60 ? Math.round(sec) + ' s ago'
+                       : sec < 3600 ? Math.round(sec / 60) + ' min ago'
+                       : Math.round(sec / 3600) + ' h ago';
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const pageTitle = document.title;
+    const tick = () => { $('#clock').textContent = new Date().toLocaleTimeString(); };
+    tick(); setInterval(tick, 1000);
+
+    // ------------------------------------------------------------ sound
+    // A restricted area is worth hearing about from any page, so the alarm
+    // lives here. Browsers only allow sound after the page was clicked once.
+    const muted = () => { try { return localStorage.getItem('pc-mute') === '1'; }
+                          catch (e) { return false; } };
+    let audio = null;
+    const unlock = () => {
+      if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+      if (audio && audio.state === 'suspended') audio.resume();
+    };
+    document.addEventListener('click', unlock);
+    function paintSound() {
+      $('#sound').textContent = muted() ? 'Alert sound: off' : 'Alert sound: on';
+      $('#sound').classList.toggle('off', muted());
+    }
+    $('#sound').onclick = () => {
+      try { localStorage.setItem('pc-mute', muted() ? '0' : '1'); } catch (e) {}
+      paintSound();
+      if (!muted()) beep(1);
+    };
+    paintSound();
+    function beep(times) {
+      if (muted() || !audio) return;
+      for (let i = 0; i < (times || 3); i++) {
+        const t = audio.currentTime + i * 0.28;
+        const osc = audio.createOscillator(), gain = audio.createGain();
+        osc.connect(gain); gain.connect(audio.destination);
+        osc.type = 'square'; osc.frequency.value = 880; gain.gain.value = 0.07;
+        osc.start(t); osc.stop(t + 0.18);
+      }
+    }
+
+    // ------------------------------------------------------------ attendance menu
+    // "Attendance" in the sidebar: from another page it goes to the attendance
+    // dashboard (so the page left is no longer marked); on an attendance page
+    // it opens and closes its menu.
+    if ($('#att-toggle')) $('#att-toggle').onclick = () => {
+      if (!$('#att-toggle').classList.contains('here')) { location.href = '{{ attendance_url }}'; return; }
+      const open = $('#att-sub').hidden;
+      $('#att-sub').hidden = !open;
+      $('#att-toggle').classList.toggle('open', open);
+      $('#att-toggle').setAttribute('aria-expanded', String(open));
+    };
+
+    // ------------------------------------------------------------ modals
+    function openModal(el) { el.hidden = false; document.body.classList.add('locked'); }
+    function closeModal(el) {
+      el.hidden = true;
+      if (!$$('.modal').some(m => !m.hidden)) document.body.classList.remove('locked');
+      if (el.onclose) el.onclose();
+    }
+    $$('.modal').forEach(m => {
+      m.addEventListener('click', e => {
+        if (e.target === m || e.target.closest('[data-close]')) closeModal(m);
+      });
+    });
+    document.addEventListener('keydown', e => {
+      const open = $$('.modal').filter(m => !m.hidden).pop();
+      if (!open) return;
+      if (e.key === 'Escape') closeModal(open);
+      if (open.id === 'lightbox' && e.key === 'ArrowLeft') lbStep(-1);
+      if (open.id === 'lightbox' && e.key === 'ArrowRight') lbStep(1);
+    });
+
+    // Live video. While it is open that camera decodes every frame and is
+    // checked more often; closing it drops the connection.
+    let liveId = null;
+    function openLive(id, name) {
+      liveId = id;
+      $('#live-name').textContent = name || id;
+      $('#live-info').textContent = 'connecting...';
+      $('#live-img').src = `/live/${encodeURIComponent(id)}?w=960`;
+      openModal($('#live'));
+    }
+    $('#live').onclose = () => { liveId = null; $('#live-img').src = 'data:,'; };
+    $('#live-ignore').onclick = () => editIgnore(liveId, $('#live-name').textContent);
+
+    // Ignore areas: shapes clicked corner by corner over the picture.
+    let igId = null, igShapes = [], igDraft = [], igDrag = null;
+    const igCv = () => $('#ig-canvas'), igImg = () => $('#ig-img');
+    function editIgnore(id, name) {
+      igId = id;
+      const cam = (lastStatus && lastStatus.cameras[id]) || {};
+      igShapes = (cam.ignore || []).map(p => p.map(q => [q[0], q[1]]));
+      igDraft = [];
+      $('#ig-name').textContent = name || id;
+      $('#ig-status').textContent = '';
+      igImg().onload = () => { igCv().width = igImg().clientWidth;
+                               igCv().height = igImg().clientHeight; igDraw(); };
+      igImg().src = `/frame/${encodeURIComponent(id)}.jpg?w=960&overlay=0&t=${Date.now()}`;
+      openModal($('#ignore'));
+    }
+    function igAt(e) {
+      const r = igCv().getBoundingClientRect();
+      return [Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1),
+              Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1)];
+    }
+    function igDraw() {
+      const cv = igCv(), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+      g.clearRect(0, 0, W, H);
+      const shape = (pts, open) => {
+        g.beginPath();
+        pts.forEach(([x, y], i) => i ? g.lineTo(x * W, y * H) : g.moveTo(x * W, y * H));
+        if (!open) {
+          g.closePath();
+          g.fillStyle = 'rgba(17, 24, 39, .45)';
+          g.fill();
+        }
+        g.setLineDash(open ? [6, 4] : []);
+        g.strokeStyle = '#f9fafb'; g.lineWidth = 2; g.stroke();
+        g.setLineDash([]);
+        pts.forEach(([x, y], i) => {            // corners; the first one of a new shape is bigger
+          g.beginPath();
+          g.arc(x * W, y * H, open && !i ? 7 : 4, 0, Math.PI * 2);
+          g.fillStyle = open && !i ? '#6366f1' : '#f9fafb';
+          g.fill();
+        });
+        if (!open) {
+          const [cx, cy] = igMid(pts);
+          g.fillStyle = '#f9fafb'; g.font = '600 12px Segoe UI, sans-serif'; g.textAlign = 'center';
+          g.fillText('ignored  ×', cx * W, cy * H + 4);
+          g.textAlign = 'start';
+        }
+      };
+      igShapes.forEach(s => shape(s, false));
+      if (igDraft.length) shape(igDraft, true);
+    }
+    // The middle of a shape, where its "ignored ×" label sits.
+    const igMid = (pts) => [pts.reduce((s, q) => s + q[0], 0) / pts.length,
+                            pts.reduce((s, q) => s + q[1], 0) / pts.length];
+    $('#ig-canvas').onpointerdown = (e) => {
+      const p = igAt(e), W = igCv().width, H = igCv().height;
+      const close = (q) => Math.hypot((q[0] - p[0]) * W, (q[1] - p[1]) * H) < 10;
+      if (igDraft.length >= 3 && close(igDraft[0])) {     // back at the first corner: the shape is done
+        igShapes.push(igDraft); igDraft = []; igDraw();
+        return;
+      }
+      for (let s = 0; s < igShapes.length; s++) {         // on a corner: drag it
+        const i = igShapes[s].findIndex(close);
+        if (i >= 0) { igDrag = [s, i]; igCv().setPointerCapture(e.pointerId); return; }
+      }
+      if (!igDraft.length) {                              // on a shape's "ignored ×": remove it
+        const s = igShapes.findIndex(poly => {
+          const [cx, cy] = igMid(poly);
+          return Math.abs((cx - p[0]) * W) < 45 && Math.abs((cy - p[1]) * H) < 14;
+        });
+        if (s >= 0) { igShapes.splice(s, 1); igDraw(); return; }
+      }
+      igDraft.push(p);
+      igDraw();
+    };
+    $('#ig-canvas').onpointermove = (e) => {
+      if (!igDrag) return;
+      igShapes[igDrag[0]][igDrag[1]] = igAt(e);
+      igDraw();
+    };
+    $('#ig-canvas').onpointerup = () => { igDrag = null; };
+    $('#ig-undo').onclick = () => { igDraft.pop(); igDraw(); };
+    $('#ig-clear').onclick = () => { igShapes = []; igDraft = []; igDraw(); };
+    $('#ig-save').onclick = async () => {
+      if (igDraft.length && igDraft.length < 3) {
+        $('#ig-status').textContent = 'A shape needs at least 3 corners';
+        return;
+      }
+      if (igDraft.length) { igShapes.push(igDraft); igDraft = []; }   // a shape not closed yet is kept too
+      const r = await post(`/api/cameras/${encodeURIComponent(igId)}/ignore`, {ignore: igShapes});
+      if (lastStatus && lastStatus.cameras[igId]) lastStatus.cameras[igId].ignore = r.ignore;
+      closeModal($('#ignore'));
+    };
+    function paintLive(s) {
+      if (!liveId) return;
+      const c = s.cameras[liveId];
+      if (!c) return;
+      const bits = [];
+      if (c.group === 'restricted') {
+        const a = c.alert || {};
+        bits.push(a.active ? `ALERT - ${a.count} inside` : a.watching ? 'area clear' : 'waiting');
+      } else if (c.count != null) {
+        bits.push(plural(c.count, 'person'));
+        if (c.on_phone) bits.push(`${c.on_phone} on phone`);
+      }
+      if (c.state === 'connected') bits.push(`${c.decoded_fps} fps`);
+      else bits.push(c.error || c.state);
+      $('#live-info').textContent = bits.join(' · ');
+    }
+
+    // Photo viewer: list of {src, caption}.
+    let lbList = [], lbAt = 0;
+    function openPhotos(list, start) {
+      lbList = list; lbAt = start || 0;
+      lbShow();
+      openModal($('#lightbox'));
+    }
+    function lbShow() {
+      const p = lbList[lbAt];
+      if (!p) return;
+      $('#lb-img').src = p.src;
+      $('#lb-dl').href = p.src;
+      $('#lb-cap').textContent = `${p.caption}  (${lbAt + 1}/${lbList.length})`;
+      $('#lb-prev').disabled = lbAt === 0;
+      $('#lb-next').disabled = lbAt === lbList.length - 1;
+    }
+    function lbStep(d) { lbAt = Math.min(Math.max(lbAt + d, 0), lbList.length - 1); lbShow(); }
+    $('#lb-prev').onclick = () => lbStep(-1);
+    $('#lb-next').onclick = () => lbStep(1);
+
+    // Every photo of an event, whole pictures first, then close-ups.
+    function eventPhotos(ev, name) {
+      const out = [];
+      (ev.meta.photos || []).forEach((shot, i) => {
+        const when = clock(shot.ts || ev.ts);
+        out.push({src: '/photos/' + shot.full, caption: `${name} - ${when}`});
+        (shot.crops || []).forEach((c, j) =>
+          out.push({src: '/photos/' + c, caption: `${name} - ${when} - person ${j + 1}`}));
+      });
+      return out;
+    }
+    function eventThumb(ev) {
+      const shot = (ev.meta.photos || [])[0];
+      if (!shot) return '';
+      return '/photos/' + ((shot.crops && shot.crops[0]) || shot.full);
+    }
+
+    // ------------------------------------------------------------ toasts
+    function toast({title, body, img, kind, onclick}) {
+      const el = document.createElement('div');
+      el.className = 'toast ' + (kind || '');
+      el.innerHTML = (img ? `<img src="${esc(img)}" alt="">` : '') +
+        `<div><b>${esc(title)}</b><span>${esc(body)}</span></div>` +
+        `<button class="x" aria-label="Dismiss">&times;</button>`;
+      el.onclick = (e) => {
+        if (e.target.closest('.x')) { el.remove(); return; }
+        if (onclick) onclick();
+        el.remove();
+      };
+      $('#toasts').prepend(el);
+      setTimeout(() => el.remove(), 20000);
+    }
+
+    // ------------------------------------------------------------ polling
+    // The sidebar and the alarm are on every page, so the status is polled
+    // here once and handed to the page through onStatus().
+    window.onStatus = null;
+    let names = {};
+    let lastStatus = null;
+    let seenAlert = null;      // newest alert id this page already knows about
+    async function newAlerts(latest) {
+      if (seenAlert === null) { seenAlert = latest; return; }
+      if (latest <= seenAlert) return;
+      const from = seenAlert;
+      seenAlert = latest;
+      const {alerts} = await api('/api/alerts?limit=10');
+      alerts.filter(a => a.id > from).reverse().forEach(a => {
+        const name = names[a.camera] || a.camera;
+        toast({
+          kind: 'alert', title: 'Restricted area - ' + name,
+          body: `${a.label} at ${clock(a.ts)}`, img: eventThumb(a),
+          onclick: () => openPhotos(eventPhotos(a, name), 0),
+        });
+      });
+      beep(3);
+    }
+
+    // A new vehicle in the parking, a camera with a problem: a note on any page.
+    let seenNotice = null;
+    async function newNotices(latest) {
+      if (latest == null) return;
+      if (seenNotice === null) { seenNotice = latest; return; }
+      if (latest <= seenNotice) return;
+      const from = seenNotice;
+      seenNotice = latest;
+      const {notices} = await api('/api/notices?after=' + from);
+      let loud = false;
+      notices.forEach(n => {
+        const name = names[n.camera] || n.camera, m = n.meta || {};
+        if (n.kind === 'fire_smoke') {
+          const flames = (m.type || n.label) === 'fire';
+          loud = true;
+          toast({kind: 'alert', title: `${flames ? 'FIRE' : 'SMOKE'} - ${name}`,
+                 body: `${flames ? 'Fire' : 'Smoke'} seen at ${clock(m.started || n.ts).slice(0, 5)}. Check at once.`,
+                 img: eventThumb(n), onclick: () => { location.href = '/fire'; }});
+          return;
+        }
+        const car = n.kind === 'parking';
+        toast({
+          kind: car ? '' : 'alert',
+          title: car ? `New vehicle - ${name}` : `${name} - ${m.title || n.label}`,
+          body: car ? `${({car: 'Car', bike: 'Bike', cycle: 'Cycle'})[m.type] || 'Vehicle'} came at ${clock(m.started || n.ts).slice(0, 5)}`
+                    : (m.text || ''),
+          img: eventThumb(n),
+          onclick: () => { location.href = car ? '/parking' : '/health'; },
+        });
+      });
+      if (notices.length) beep(loud ? 6 : 1);
+    }
+
+    // Cloud view: how fresh is what the office PC sent?
+    function paintCloud(c) {
+      const bar = $('#cloud-bar');
+      if (!bar) return;
+      const ago = c.office_seen_ago;
+      const away = ago == null || ago > 90;
+      bar.classList.toggle('away', away);
+      bar.textContent = ago == null
+        ? 'Cloud view - the office PC has not sent anything yet. Turn it on under Settings -> Cloud view on the office PC.'
+        : away ? `Cloud view - the office PC stopped sending at ${clock(c.office_seen_at).slice(0, 5)}. Records up to then are shown; nothing is live.`
+        : `Cloud view - changes here are made on the office PC. It sent data ${ago < 5 ? 'just now' : ago + ' s ago'}.`;
+    }
+
+    // New code running (the office PC or the cloud copy was updated): load
+    // it - in a browser tab and in the installed app alike - but never in the
+    // middle of something: not while a window is open or a box is typed in.
+    let appVersion = null, appOutdated = false;
+    function newVersion(v) {
+      if (!v) return false;
+      if (appVersion === null) appVersion = v;
+      if (v !== appVersion) appOutdated = true;
+      const busy = $$('.modal').some(m => !m.hidden) ||
+        ['INPUT', 'TEXTAREA', 'SELECT'].includes((document.activeElement || {}).tagName);
+      if (!appOutdated || busy) return false;
+      location.reload();
+      return true;
+    }
+
+    async function poll() {
+      let s;
+      try { s = await api('/api/status'); } catch (e) {
+        $('#engine').textContent = 'Server not reachable';
+        return;
+      }
+      if (s.login_required) { location.href = '/login'; return; }
+      if (newVersion(s.version)) return;
+      if (s.cloud) paintCloud(s.cloud);
+      lastStatus = s;
+      names = {};
+      Object.values(s.cameras).forEach(c => names[c.id] = c.name);
+
+      const n = (s.alerting || []).length;
+      $('#alert-badge').hidden = n === 0;
+      $('#alert-badge').textContent = n || '';
+      $('#phone-badge').hidden = !s.on_phone_total;
+      $('#phone-badge').textContent = s.on_phone_total || '';
+      const inUse = Object.values(s.cameras).filter(c => c.washroom && c.washroom.in_use).length;
+      $('#wash-badge').hidden = !inUse;
+      $('#wash-badge').textContent = inUse ? 'door' : '';
+      $('#health-badge').hidden = !s.health_problems;
+      $('#health-badge').textContent = s.health_problems || '';
+      $('#fire-badge').hidden = !s.fire_now;
+      $('#fire-badge').textContent = s.fire_now || '';
+      document.title = n ? `(${n}) ALERT - ${pageTitle}` : pageTitle;
+
+      const d = s.detection;
+      $('#engine').textContent =
+        d.state === 'running' ? `Detection: ${d.perf.per_second}/s on ${d.device}`
+        : d.state === 'loading' ? 'Detection: loading model...'
+        : d.state === 'error' ? 'Detection error' : 'Detection: off';
+
+      newAlerts(s.latest_alert).catch(() => {});
+      newNotices(s.latest_notice).catch(() => {});
+      paintLive(s);
+      if (window.onStatus) window.onStatus(s);
+    }
+    poll();
+    setInterval(poll, 1500);
+
+    // ------------------------------------------------------------ deleting records with photos
+    // A trash icon on each photo (two separate clicks - a double-click does
+    // nothing) and Select -> tick several -> delete them together. A page
+    // wraps each card with delWrap() and calls refresh(ids) after drawing.
+    // On the cloud view the office PC deletes them.
+    const TRASH_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>';
+    function delWrap(id, inner, cls) {
+      return `<div class="inc-wrap ${cls || ''}" data-id="${id}"><span class="inc-check" aria-hidden="true"></span>` +
+        inner + `<button class="inc-del" type="button" title="Delete this record and its photos"` +
+        ` aria-label="Delete">${TRASH_ICON}</button></div>`;
+    }
+    class DeleteList {
+      constructor(list, {reload, noun}) {
+        this.list = $(list);
+        this.reload = reload;
+        this.noun = noun || 'record';
+        this.selecting = false;
+        this.picked = new Set();
+        this.ids = [];
+        const head = this.list.closest('.card').querySelector('.card-head');
+        this.toggle = document.createElement('button');
+        this.toggle.className = 'ghost sm';
+        this.toggle.textContent = 'Select';
+        this.toggle.hidden = true;
+        head.insertBefore(this.toggle, head.querySelector('input[type=date]'));
+        this.bar = document.createElement('div');
+        this.bar.className = 'sel-bar';
+        this.bar.hidden = true;
+        this.bar.innerHTML = '<span class="sel-n">0 selected</span>' +
+          '<button class="ghost sm sel-all">Select all</button>' +
+          '<button class="danger sm sel-del" disabled>Delete selected</button>' +
+          '<button class="ghost sm sel-cancel">Cancel</button>';
+        const above = this.list.closest('.table-wrap') || this.list;
+        above.parentNode.insertBefore(this.bar, above);
+        this.toggle.onclick = () => { this.selecting = true; this.paint(); };
+        $('.sel-cancel', this.bar).onclick = () => this.end();
+        $('.sel-all', this.bar).onclick = () => {
+          if (this.picked.size === this.ids.length) this.picked.clear();
+          else this.ids.forEach(id => this.picked.add(id));
+          this.paint();
+        };
+        $('.sel-del', this.bar).onclick = (e) => this.confirm(e.currentTarget, () => [...this.picked]);
+        // Clicks are caught before the card's own: in Select a card is ticked,
+        // not opened; the trash icon deletes.
+        this.list.addEventListener('click', (e) => {
+          const wrap = e.target.closest('.inc-wrap');
+          if (!wrap || !this.list.contains(wrap)) return;
+          const del = e.target.closest('.inc-del');
+          if (!del && !this.selecting) return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (del) return this.confirm(del, () => [+wrap.dataset.id]);
+          const id = +wrap.dataset.id;
+          this.picked.has(id) ? this.picked.delete(id) : this.picked.add(id);
+          this.paint();
+        }, true);
+      }
+      refresh(ids) {
+        this.ids = ids;
+        const shown = new Set(ids);
+        [...this.picked].forEach(id => shown.has(id) || this.picked.delete(id));
+        this.paint();
+      }
+      paint() {
+        this.bar.hidden = !this.selecting;
+        this.toggle.hidden = this.selecting || !this.ids.length;
+        this.list.classList.toggle('selecting', this.selecting);
+        $$('.inc-wrap', this.list).forEach(w => w.classList.toggle('picked', this.picked.has(+w.dataset.id)));
+        $('.sel-n', this.bar).textContent = `${this.picked.size} selected`;
+        const del = $('.sel-del', this.bar);
+        del.disabled = !this.picked.size;
+        if (!del.classList.contains('sure'))
+          del.textContent = this.picked.size ? `Delete ${plural(this.picked.size, this.noun)}` : 'Delete selected';
+        $('.sel-all', this.bar).textContent =
+          this.ids.length && this.picked.size === this.ids.length ? 'Select none' : 'Select all';
+      }
+      end() {
+        this.selecting = false;
+        this.picked.clear();
+        this.paint();
+      }
+      async confirm(btn, ids) {
+        if (btn.classList.contains('sure') && Date.now() - btn.armedAt < 700) return;
+        clearTimeout(btn.undoTimer);
+        const icon = btn.classList.contains('inc-del');
+        if (!btn.classList.contains('sure')) {
+          btn.armedAt = Date.now();
+          btn.classList.add('sure');
+          btn.innerHTML = icon ? `${TRASH_ICON}<span>Delete?</span>`
+            : `Click again to delete ${plural(ids().length, this.noun)}`;
+          btn.undoTimer = setTimeout(() => {
+            btn.classList.remove('sure');
+            if (icon) btn.innerHTML = TRASH_ICON; else this.paint();
+          }, 4000);
+          return;
+        }
+        btn.disabled = true;
+        const r = await post('/api/records/delete', {ids: ids()});
+        btn.classList.remove('sure');
+        btn.disabled = false;
+        if (r.ok) {
+          toast({title: 'Deleted', body: r.message, kind: 'info'});
+          if (!icon) this.end();
+        }
+        this.reload();
+      }
+    }
+
+    // ------------------------------------------------------------ app (PWA)
+    // Installable as an app, and phone alerts (web push) sent by the office
+    // PC - only on https or localhost, which is what browsers allow.
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+      navigator.serviceWorker.register('/sw.js').then(setupAlerts).catch(() => {});
+    }
+    let installEvent = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      installEvent = e;
+      $('#install-app').hidden = false;
+    });
+    $('#install-app').onclick = async () => {
+      if (!installEvent) return;
+      installEvent.prompt();
+      await installEvent.userChoice.catch(() => {});
+      installEvent = null;
+      $('#install-app').hidden = true;
+    };
+    window.addEventListener('appinstalled', () => { $('#install-app').hidden = true; });
+
+    function b64key(s) {
+      const raw = atob((s + '='.repeat((4 - s.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
+      return Uint8Array.from(raw, c => c.charCodeAt(0));
+    }
+    async function setupAlerts(reg) {
+      const btn = $('#phone-alerts');
+      if (!('PushManager' in window) || !('Notification' in window)) {
+        // iPhone: alerts work once the app is on the home screen (Share -> Add to Home Screen).
+        return;
+      }
+      btn.hidden = false;
+      const paint = async () => {
+        const sub = await reg.pushManager.getSubscription();
+        btn.textContent = sub ? 'Phone alerts: on' : 'Phone alerts: off';
+        btn.classList.toggle('off', !sub);
+        return sub;
+      };
+      await paint();
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          const sub = await reg.pushManager.getSubscription();
+          if (sub) {
+            await post('/api/push/unsubscribe', {endpoint: sub.endpoint});
+            await sub.unsubscribe();
+            toast({title: 'Phone alerts', body: 'Off on this device.', kind: 'info'});
+          } else {
+            if (await Notification.requestPermission() !== 'granted') {
+              toast({title: 'Phone alerts', body: 'Notifications are blocked for this site - allow them in the browser settings.', kind: 'info'});
+              return;
+            }
+            const {key} = await api('/api/push/key');
+            const fresh = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: b64key(key)});
+            const r = await post('/api/push/subscribe', {subscription: fresh.toJSON(),
+                                                         device: navigator.userAgent.slice(0, 80)});
+            toast({title: 'Phone alerts', body: r.message || 'On', kind: 'info'});
+          }
+        } catch (e) {
+          toast({title: 'Phone alerts', body: 'Could not turn them on here: ' + (e.message || e), kind: 'info'});
+        } finally {
+          btn.disabled = false;
+          paint();
+        }
+      };
+    }
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

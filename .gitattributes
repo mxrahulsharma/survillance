@@ -1,0 +1,11 @@
+# Files that run on the Linux server must keep LF line endings,
+# even when the repo is committed from Windows.
+* text=auto
+*.sh text eol=lf
+Dockerfile text eol=lf
+Caddyfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+.env.example text eol=lf
+*.bat text eol=crlf
+*.png binary

@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+{% block content %}
+{# totals of the period, for the numbers at the top #}
+{% set t_present = summary|sum(attribute='present') %}
+{% set t_work = summary|sum(attribute='working_days') %}
+{% set t_late = summary|sum(attribute='late') %}
+{% set t_late_min = summary|sum(attribute='late_min') %}
+{% set t_half = summary|sum(attribute='half_day') %}
+{% set t_absent = summary|sum(attribute='absent') %}
+{% set t_leave = summary|sum(attribute='leave') %}
+{% set t_wfh = summary|sum(attribute='wfh') %}
+{% set n_emp = summary|selectattr('working_days')|list|length %}
+<style>
+  .rep-quick { margin-bottom: 12px; }
+  .rep-quick .btn.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .rep-period { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
+  .rep-period b { color: var(--ink); }
+  .tile .s { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .rep-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .seg { display: inline-flex; background: #e9edf5; border-radius: 10px; padding: 4px; gap: 4px; flex-wrap: wrap; }
+  .seg button { border: 0; background: none; padding: 7px 14px; border-radius: 8px; font: inherit;
+                font-weight: 600; color: var(--muted); cursor: pointer; }
+  .seg button.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(15,23,42,.1); }
+  .rep-bar input[type=search] { margin-left: auto; max-width: 260px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 10px; font-size: 12px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { font-style: normal; display: inline-block; min-width: 26px; text-align: center; padding: 1px 4px;
+              border-radius: 4px; border: 1px solid var(--line); font-weight: 600; font-size: 11px; color: var(--ink); }
+  .sheet-wrap { overflow: auto; max-height: 72vh; border: 1px solid var(--line); border-radius: 8px; }
+  table.sheet { border-collapse: separate; border-spacing: 0; font-size: 12.5px; white-space: nowrap; }
+  .sheet th, .sheet td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+                         padding: 4px 6px; text-align: center; }
+  .sheet thead th { position: sticky; top: 0; z-index: 2; background: #eef2ff; color: #3730a3;
+                    font-weight: 700; font-size: 12px; line-height: 1.2; }
+  .sheet thead th small { display: block; font-weight: 600; font-size: 10.5px; color: var(--muted); }
+  .sheet .nm, .sheet .dg { text-align: left; }
+  .sheet .nm { position: sticky; left: 0; z-index: 1; background: var(--card); font-weight: 600; min-width: 150px; }
+  .sheet thead .nm { z-index: 3; background: #eef2ff; }
+  .sheet .dg { color: var(--muted); max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+  .sheet td.c { min-width: 30px; color: var(--ink); }
+  .sheet th.off, .sheet td.off, .legend i.off { background: #fce7f3; }
+  .sheet th.today { box-shadow: inset 0 -3px 0 var(--brand); }
+  .sheet td.late, .legend i.late { color: var(--warn); }
+  .sheet td.hd, .legend i.hd { background: var(--half-bg); color: var(--half); font-weight: 600; }
+  .sheet td.leave, .legend i.leave { background: var(--info-bg); color: var(--info); font-weight: 600; }
+  .sheet td.ab, .legend i.ab { background: var(--bad-bg); color: var(--bad); font-weight: 600; }
+  .sheet td.wfh, .legend i.wfh { color: var(--ok); font-weight: 600; font-size: 11px; }
+  .sheet td.na, .legend i.na { color: #94a3b8; font-size: 11px; }
+  .sheet td.manual, .legend i.manual { background: #a5f3fc; }
+  .sheet .pay { font-weight: 700; min-width: 70px; background: #f8fafc; }
+  .sheet tfoot td { position: sticky; bottom: 0; background: #f8fafc; font-weight: 700; color: var(--ink-2, #334155); }
+  .sheet tfoot .nm { z-index: 2; background: #f8fafc; }
+  .sheet tbody tr:hover td { filter: brightness(.97); }
+  .pct { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+  .pct .bar { flex: 1; height: 6px; background: #e9edf5; border-radius: 3px; overflow: hidden; }
+  .pct .bar i { display: block; height: 100%; background: var(--ok); }
+  .pct.mid .bar i { background: var(--warn); } .pct.low .bar i { background: var(--bad); }
+  .pct b { min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+  #sum-table td:first-child { min-width: 180px; }
+  th[data-sort] { cursor: pointer; user-select: none; }
+  th[data-sort]:hover { color: var(--ink); }
+  th[data-sort].asc::after { content: " \25B2"; font-size: 9px; }
+  th[data-sort].desc::after { content: " \25BC"; font-size: 9px; }
+  .chip.f { cursor: pointer; }
+  .chip.f.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .chip.f.on b { color: #fff; }
+  @media (max-width: 600px) { .rep-bar input[type=search] { margin-left: 0; max-width: none; width: 100%; } }
+</style>
+
+<div class="card">
+  <div class="row rep-quick">
+    <span class="small muted">Period</span>
+    <button type="button" class="btn ghost sm" data-range="month">This month</button>
+    <button type="button" class="btn ghost sm" data-range="last-month">Last month</button>
+    <button type="button" class="btn ghost sm" data-range="week">Last 7 days</button>
+    <button type="button" class="btn ghost sm" data-range="today">Today</button>
+  </div>
+  <form method="get" class="form-grid" id="rep-form">
+    <div><label class="f">From</label><input type="date" name="start" value="{{ start }}"></div>
+    <div><label class="f">To</label><input type="date" name="end" value="{{ end }}"></div>
+    <div><label class="f">Employee</label><select name="emp"><option value="">All employees</option>{% for e in emps %}<option value="{{ e.id }}" {{ 'selected' if emp_id == e.id }}>{{ e.name }} ({{ e.emp_code }})</option>{% endfor %}</select></div>
+    <div class="row"><button class="btn">Show</button>
+      <a class="btn ghost" href="{{ url_for('reports_excel', start=start, end=end, emp=emp_id or '') }}">Download Excel</a></div>
+  </form>
+</div>
+
+<p class="rep-period"><b>{{ start }}</b> to <b>{{ end }}</b> &middot; {{ sheet.days|length }} days &middot; {{ n_emp }} employee{{ '' if n_emp == 1 else 's' }}</p>
+<div class="tiles">
+  <div class="tile {{ 'ok' if t_work and t_present / t_work >= 0.85 else 'warn' if t_work and t_present / t_work >= 0.6 else 'bad' if t_work else '' }}">
+    <div class="k">Attendance</div>
+    <div class="v">{{ ((t_present / t_work * 100)|round|int ~ '%') if t_work else '-' }}</div>
+    <div class="s">{{ t_present }} of {{ '%g'|format(t_work) }} working days</div>
+  </div>
+  <div class="tile warn"><div class="k">Late</div><div class="v">{{ t_late }}</div>
+    <div class="s">{{ t_late_min|hm if t_late_min else 'no late time' }}</div></div>
+  <div class="tile half"><div class="k">Half days</div><div class="v">{{ t_half }}</div><div class="s">count as ½ day</div></div>
+  <div class="tile bad"><div class="k">Absent days</div><div class="v">{{ '%g'|format(t_absent) }}</div><div class="s">not in, no leave</div></div>
+  <div class="tile"><div class="k">Leave</div><div class="v">{{ '%g'|format(t_leave) }}</div><div class="s">approved leave days</div></div>
+  <div class="tile"><div class="k">WFH</div><div class="v">{{ t_wfh }}</div><div class="s">work from home days</div></div>
+</div>
+
+<div class="rep-bar">
+  <div class="seg" role="tablist">
+    <button type="button" role="tab" data-tab="sheet" class="on">Attendance sheet</button>
+    <button type="button" role="tab" data-tab="summary">Summary</button>
+    <button type="button" role="tab" data-tab="days">Day-wise</button>
+  </div>
+  <input type="search" id="rep-find" placeholder="Find employee..." aria-label="Find employee">
+</div>
+
+{# ---------------------------------------------------------------- the sheet #}
+<div class="card rep-pane" data-pane="sheet">
+  <div class="legend">
+    <span><i>P</i> present</span><span><i class="late">P</i> late</span><span><i class="hd">HD</i> half day</span>
+    <span><i class="leave">L</i> leave (HL half)</span><span><i class="ab">AB</i> absent</span>
+    <span><i class="off">H</i> holiday / weekly off</span><span><i class="wfh">WFH</i> work from home</span>
+    <span><i class="na">N/A</i> not employed yet</span><span><i class="manual">&nbsp;</i> entered by hand</span>
+  </div>
+  <div class="sheet-wrap"><table class="sheet">
+    <thead>
+      <tr><th class="nm">Name</th><th class="dg">Designation</th>
+        {% for d in sheet.days %}<th class="{{ 'off' if d.off }}{{ ' today' if d.today }}">{{ d.label }}<small>{{ d.wd }}</small></th>{% endfor %}
+        <th class="pay">Payable days</th></tr>
+    </thead>
+    <tbody>{% for e in sheet.rows %}<tr data-name="{{ e.name|lower }}">
+      <td class="nm" title="{{ e.code }}">{{ e.name }}</td><td class="dg" title="{{ e.designation }}">{{ e.designation or '-' }}</td>
+      {% for c in e.cells %}<td class="c {{ c.cls }}" title="{{ c.title }}">{{ c.code }}</td>{% endfor %}
+      <td class="pay">{{ '%g'|format(e.payable) }}</td></tr>
+    {% else %}<tr><td colspan="{{ sheet.days|length + 3 }}" class="empty">No data</td></tr>{% endfor %}</tbody>
+    {% if sheet.rows %}<tfoot><tr><td class="nm">Came in</td><td class="dg"></td>
+      {% for d in sheet.days %}<td class="{{ 'off' if d.off }}">{{ d.came if d.came is not none else '' }}</td>{% endfor %}
+      <td class="pay"></td></tr></tfoot>{% endif %}
+  </table></div>
+  <p class="small muted" style="margin-bottom:0">Payable days = P + WFH + H + paid leave + &frac12; for each HD (unpaid leave and AB count 0). Hover a cell for the times.</p>
+</div>
+
+{# ---------------------------------------------------------------- summary #}
+<div class="card rep-pane" data-pane="summary" hidden>
+  <div class="table-wrap"><table class="table" id="sum-table">
+    <thead><tr>
+      <th data-sort="text">Employee</th><th data-sort="num">Attendance</th><th data-sort="num">Present</th>
+      <th data-sort="num">On Time</th><th data-sort="num">Late</th><th data-sort="num">Half Day</th>
+      <th data-sort="num">Leave</th><th data-sort="num">Absent</th><th data-sort="num">WFH</th>
+      <th data-sort="num">Payable</th>
+      <th data-sort="num" title="Total time late on Late days">Late by (total)</th>
+      <th data-sort="num" title="First IN to last OUT, days with an OUT time">Worked</th></tr></thead>
+    <tbody>{% for s in summary %}{% set sh = sheet.rows[loop.index0] %}
+      {% set p = (s.present / s.working_days * 100) if s.working_days else none %}
+      <tr data-name="{{ s.name|lower }}">
+      <td data-v="{{ s.name|lower }}"><b>{{ s.name }}</b> <span class="small muted">{{ s.code }}</span>{% if s.department %}<div class="small muted">{{ s.department }}</div>{% endif %}</td>
+      <td data-v="{{ p if p is not none else -1 }}">{% if p is not none %}<div class="pct {{ 'low' if p < 60 else 'mid' if p < 85 }}"><div class="bar"><i style="width:{{ p|round|int }}%"></i></div><b>{{ p|round|int }}%</b></div>{% else %}<span class="muted">-</span>{% endif %}</td>
+      <td class="num" data-v="{{ s.present }}">{{ s.present }}</td><td class="num" data-v="{{ s.on_time }}">{{ s.on_time }}</td>
+      <td class="num" data-v="{{ s.late }}">{{ s.late }}</td><td class="num" data-v="{{ s.half_day }}">{{ s.half_day }}</td>
+      <td class="num" data-v="{{ s.leave }}">{{ '%g'|format(s.leave) }}</td><td class="num" data-v="{{ s.absent }}">{{ '%g'|format(s.absent) }}</td>
+      <td class="num" data-v="{{ s.wfh }}">{{ s.wfh }}</td><td class="num" data-v="{{ sh.payable }}"><b>{{ '%g'|format(sh.payable) }}</b></td>
+      <td class="num" data-v="{{ s.late_min }}">{{ s.late_min|hm }}</td><td class="num" data-v="{{ s.hours }}">{{ s.hours|hhm }}</td></tr>
+    {% else %}<tr><td colspan="12" class="empty">No data</td></tr>{% endfor %}</tbody></table></div>
+  <p class="small muted" style="margin-bottom:0">Click a column to sort. Attendance = present days out of working days (absent and leave days count as working days). Late by = total time after office start on Late days (e.g. 1h 05m). Worked = first IN to last OUT; a day without an OUT time is not counted.</p>
+</div>
+
+{# ---------------------------------------------------------------- day-wise #}
+<div class="card rep-pane" data-pane="days" hidden>
+  <div class="chips" id="day-filter" style="margin-bottom:12px">
+    <span class="chip f on" data-f="">All <b>{{ rows|length }}</b></span>
+    {% for st, label in [('Late', 'Late'), ('Half Day', 'Half day'), ('Absent', 'Absent'), ('Leave', 'Leave'), ('WFH', 'WFH'), ('On Time', 'On time')] %}
+    <span class="chip f" data-f="{{ st }}">{{ label }} <b>{{ rows|selectattr('status', 'equalto', st)|list|length }}</b></span>
+    {% endfor %}
+    <span class="chip f" data-f="manual">Entered by hand <b>{{ rows|selectattr('source', 'equalto', 'manual')|list|length }}</b></span>
+  </div>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>Date</th><th>Employee</th><th>In</th><th>Last out</th><th>Hours</th><th>Status</th><th>Movements (click for photo)</th></tr></thead>
+    <tbody>{% for r in rows %}<tr data-name="{{ r.name|lower }}" data-status="{{ r.status }}" data-manual="{{ '1' if r.source == 'manual' }}">
+      <td class="num">{{ r.date }} <span class="small muted">{{ r.weekday }}</span></td>
+      <td>{{ r.name }} <span class="small muted">{{ r.code }}</span></td>
+      <td class="num">{{ r.check_in or '-' }}</td><td class="num">{{ r.check_out or '-' }}</td><td class="num">{{ r.hours|hhm }}</td>
+      <td><span class="badge {{ r.status|sc }}">{{ r.status }}{% if r.late_min %} +{{ r.late_min|hm }}{% endif %}</span>{% if r.leave %}<span class="tag">{{ r.leave }}</span>{% endif %}{% if r.source == 'manual' %}<span class="tag" title="{{ r.note }}">manual</span>{% endif %}</td>
+      <td>{% for m in r.moves %}<span class="badge b-{{ m.kind|lower }}" style="margin:1px;{{ 'cursor:zoom-in' if m.photo }}" {% if m.photo %}onclick="zoom('{{ url_for('snapshot', rel=m.photo) }}')"{% endif %}>{{ m.kind }} {{ m.time }}</span>{% if m.field %}<a class="small" href="https://www.google.com/maps?q={{ m.lat }},{{ m.lng }}" target="_blank" rel="noopener" title="Marked from outside - open location">field{{ '' if m.verified else ' ⚠' }}</a>{% endif %} {% else %}{% if r.in_photo %}<img class="thumb" src="{{ url_for('snapshot', rel=r.in_photo) }}" onclick="zoom(this.src)" alt="">{% endif %}{% endfor %}</td>
+    </tr>{% else %}<tr><td colspan="7" class="empty">No data</td></tr>{% endfor %}</tbody></table></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => [...(r || document).querySelectorAll(s)];
+  const form = $('#rep-form');
+
+  // quick periods: fill From / To and show
+  const iso = (d) => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const ranges = () => {
+    const t = new Date(); t.setHours(12, 0, 0, 0);
+    const first = new Date(t.getFullYear(), t.getMonth(), 1, 12);
+    const lastStart = new Date(t.getFullYear(), t.getMonth() - 1, 1, 12);
+    const lastEnd = new Date(t.getFullYear(), t.getMonth(), 0, 12);
+    const week = new Date(t); week.setDate(t.getDate() - 6);
+    return {month: [first, t], 'last-month': [lastStart, lastEnd], week: [week, t], today: [t, t]};
+  };
+  const now = ranges();
+  $$('[data-range]').forEach(b => {
+    const [a, z] = now[b.dataset.range];
+    if (form.start.value === iso(a) && form.end.value === iso(z)) b.classList.add('on');
+    b.onclick = () => { form.start.value = iso(a); form.end.value = iso(z); form.submit(); };
+  });
+
+  // tabs, remembered on this browser
+  const show = (name) => {
+    $$('.seg button').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
+    $$('.rep-pane').forEach(p => { p.hidden = p.dataset.pane !== name; });
+    try { localStorage.setItem('rep-tab', name); } catch (e) { /* no storage */ }
+  };
+  $$('.seg button').forEach(b => b.onclick = () => show(b.dataset.tab));
+  let first = 'sheet';
+  try { first = localStorage.getItem('rep-tab') || 'sheet'; } catch (e) { /* no storage */ }
+  if ($(`.rep-pane[data-pane="${first}"]`)) show(first);
+
+  // find an employee (all three tabs) and the day-wise status filter
+  let status = '';
+  const apply = () => {
+    const q = $('#rep-find').value.trim().toLowerCase();
+    $$('tr[data-name]').forEach(tr => {
+      const okName = !q || tr.dataset.name.includes(q);
+      const okStatus = !('status' in tr.dataset) || !status ||
+        (status === 'manual' ? tr.dataset.manual === '1' : tr.dataset.status === status);
+      tr.hidden = !(okName && okStatus);
+    });
+  };
+  $('#rep-find').addEventListener('input', apply);
+  $$('#day-filter .chip.f').forEach(c => c.onclick = () => {
+    $$('#day-filter .chip.f').forEach(x => x.classList.toggle('on', x === c));
+    status = c.dataset.f;
+    apply();
+  });
+
+  // sort the summary by any column
+  $$('#sum-table th[data-sort]').forEach((th, col) => th.onclick = () => {
+    const body = $('#sum-table tbody');
+    const rows = $$('tr[data-name]', body);
+    // first click: names A-Z, numbers biggest first; the next click turns it round
+    const dir = th.classList.contains('asc') ? -1 : th.classList.contains('desc') ? 1
+              : th.dataset.sort === 'text' ? 1 : -1;
+    $$('#sum-table th').forEach(x => x.classList.remove('asc', 'desc'));
+    th.classList.add(dir === 1 ? 'asc' : 'desc');
+    const val = (tr) => tr.children[col].dataset.v;
+    rows.sort((a, b) => th.dataset.sort === 'num'
+      ? (parseFloat(val(a)) - parseFloat(val(b))) * dir
+      : val(a).localeCompare(val(b)) * dir);
+    rows.forEach(r => body.appendChild(r));
+  });
+})();
+</script>
+{% endblock %}

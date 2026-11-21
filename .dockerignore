@@ -1,0 +1,16 @@
+.git
+.claude
+# secrets stay out of the image: docker-compose reads .env at start
+.env
+data
+runs
+*.pt
+*.ts
+*.log
+*.zip
+__pycache__
+*.pyc
+# NetraAttend: the image downloads its own face models; backups and logs stay on the PC
+netra/models/*.onnx
+netra/backups
+netra/logs
