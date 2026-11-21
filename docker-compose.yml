@@ -2,6 +2,8 @@
 #   app   = OfficeEye's cloud view at /  +  NetraAttend's website, employee panel
 #           and API at /attendance - one container, one process
 #   caddy = https in front of it, free Let's Encrypt certificate for $DOMAIN
+#           (not started when PROXY=apache in .env: the server's own Apache
+#           forwards $DOMAIN to 127.0.0.1:$APP_PORT instead - deploy/vps_install.sh)
 # The cameras stay on the office PC (OfficeEye and NetraAttend there); settings
 # in .env - see .env.example and DEPLOY_VPS.md.
 services:
@@ -15,6 +17,9 @@ services:
       NETRA_ROLE: web
     expose:
       - "8000"
+    # only reachable from the server itself (for an existing Apache/Nginx)
+    ports:
+      - "127.0.0.1:${APP_PORT:-8800}:8000"
 
   caddy:
     image: caddy:2.8

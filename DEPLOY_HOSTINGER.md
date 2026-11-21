@@ -1,94 +1,61 @@
-# Deploy OfficeEye on a Hostinger VPS at survillance.itsybizz.com
+# Deploy OfficeEye on the Hostinger VPS at netraai.itsybizz.com
 
-The project already ships with everything the server needs:
-`Dockerfile` (the app), `docker-compose.yml` (app + Caddy), `deploy/Caddyfile`
-(free automatic HTTPS) and `deploy/vps_install.sh` (install / update).
-This guide is the exact path: **PC -> GitHub -> Hostinger VPS -> subdomain**.
+Server: Hostinger VPS `62.72.23.1`, Ubuntu 22.04, **Apache already serves other
+websites on ports 80/443**. So the project's own Caddy is not used here: the app
+runs in Docker on `127.0.0.1:8800`, and Apache forwards `netraai.itsybizz.com`
+to it (HTTPS from Let's Encrypt via certbot). `deploy/vps_install.sh` does the
+Docker and Apache part when `.env` has `PROXY=apache`.
 
 ```
-Office PC (cameras)  --push-->  https://survillance.itsybizz.com  (VPS: Docker -> Caddy -> app:8000)
-                                         |
-                                  MongoDB Atlas (office_eye)
+Office PC (cameras) --push--> https://netraai.itsybizz.com
+                              VPS: Apache :443 -> 127.0.0.1:8800 -> Docker app :8000
+                                                                     |
+                                                          MongoDB Atlas (office_eye)
+```
+
+GitHub repo: `https://github.com/mxrahulsharma/survillance` (keep it **Private**).
+
+---
+
+## Part 1 - DNS (done)
+
+hPanel -> Domains -> itsybizz.com -> DNS / Nameservers: `A` record, name
+`netraai`, value `62.72.23.1`. Check: `nslookup netraai.itsybizz.com` -> 62.72.23.1.
+
+---
+
+## Part 2 - Prepare the VPS (once)
+
+```bash
+ssh root@62.72.23.1
+apt update && apt install -y git curl
+```
+
+Firewall: in hPanel -> VPS -> **Firewall**, ports 80 and 443 must be allowed
+(they already are, since the other websites work). Don't turn on `ufw` on this
+server without checking what else it serves - it would block every port not
+listed.
+
+Swap (only if `free -h` shows no swap; the first build installs PyTorch):
+
+```bash
+fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
 ```
 
 ---
 
-## Part 1 - Push the code to GitHub (on your Windows PC)
-
-1. Repository: `https://github.com/mxrahulsharma/survillance` (keep it **Private**:
-   Settings -> General -> Danger Zone -> Change visibility).
-2. In PowerShell, inside `D:\ai_project\OfficeEye`:
-   ```powershell
-   git remote add origin https://github.com/mxrahulsharma/survillance.git
-   git branch -M main
-   git push -u origin main
-   ```
-   (The first push opens a browser window to sign in to GitHub.)
-
-`.gitignore` already keeps `.env`, `data/`, models, logs and zips out of GitHub -
-never commit `.env`.
-
----
-
-## Part 2 - Point the subdomain at the VPS (Hostinger hPanel)
-
-1. hPanel -> **VPS** -> your server -> copy its **IPv4 address**.
-2. hPanel -> **Domains** -> `itsybizz.com` -> **DNS / Nameservers** -> **Add record**:
-
-   | Type | Name          | Points to       | TTL |
-   |------|---------------|-----------------|-----|
-   | A    | `survillance` | `<VPS IPv4>`    | 300 |
-
-3. Wait 5-30 minutes, then check from your PC:
-   ```powershell
-   nslookup survillance.itsybizz.com
-   ```
-   It must answer with the VPS IP **before** you start the app (the HTTPS
-   certificate is issued for this name on first start).
-
----
-
-## Part 3 - Prepare the VPS (once)
-
-Recommended: Ubuntu 22.04/24.04, **at least 2 GB RAM** (4 GB+ is comfortable;
-the build installs PyTorch).
-
-1. hPanel -> VPS -> **Firewall**: allow TCP **22, 80, 443** (or leave the
-   Hostinger firewall off and use ufw below).
-2. Connect from PowerShell (root password / SSH key from hPanel -> VPS -> Overview):
-   ```powershell
-   ssh root@<VPS IPv4>
-   ```
-3. On the VPS:
-   ```bash
-   apt update && apt upgrade -y
-   apt install -y git curl ufw
-   ufw allow OpenSSH && ufw allow 80 && ufw allow 443 && ufw --force enable
-
-   # Swap, so the Docker build does not run out of memory on small VPS plans
-   fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
-   echo '/swapfile none swap sw 0 0' >> /etc/fstab
-   ```
-4. **Check that nothing else uses ports 80/443** (e.g. a Hostinger template with
-   Nginx/Apache/CyberPanel):
-   ```bash
-   ss -tlnp | grep -E ':80 |:443 '
-   ```
-   Empty output = good, continue. If something is listed, see **Part 7**.
-
----
-
-## Part 4 - Get the code from GitHub onto the VPS
+## Part 3 - Get the code from GitHub
 
 The repo is private, so give the VPS a read-only **deploy key**:
 
 ```bash
-ssh-keygen -t ed25519 -C "officeeye-vps" -f ~/.ssh/id_ed25519 -N ""
+ssh-keygen -t ed25519 -C "vps" -f ~/.ssh/id_ed25519 -N ""
 cat ~/.ssh/id_ed25519.pub
 ```
 
 Copy the printed line -> GitHub repo -> **Settings -> Deploy keys -> Add deploy key**
-(title `vps`, leave "Allow write access" off) -> Add. Then:
+(leave "Allow write access" off). Then:
 
 ```bash
 cd /opt
@@ -96,20 +63,24 @@ git clone git@github.com:mxrahulsharma/survillance.git
 cd survillance
 ```
 
+(answer `yes` to the GitHub host fingerprint question)
+
 ---
 
-## Part 5 - Configure and start
+## Part 4 - Configure and start
 
 ```bash
 bash deploy/vps_install.sh     # 1st run: installs Docker, creates .env, stops
 nano .env                      # fill in the values below, Ctrl+O Enter, Ctrl+X
-bash deploy/vps_install.sh     # 2nd run: builds and starts (10-20 min first time)
+bash deploy/vps_install.sh     # 2nd run: builds (10-20 min first time), starts, adds the Apache site
 ```
 
-`.env` values:
+`.env`:
 
 ```ini
-DOMAIN=survillance.itsybizz.com
+DOMAIN=netraai.itsybizz.com
+PROXY=apache
+APP_PORT=8800
 
 OFFICEEYE_USER=admin
 OFFICEEYE_PASSWORD=<strong password for the website>
@@ -123,28 +94,46 @@ NETRA_ADMIN_PASSWORD=<strong password>
 NETRA_ADMIN_LAN_ONLY=False
 ```
 
-Make random strings on the VPS with: `openssl rand -hex 32`
-(the script refuses to start while any value is still `change-me`).
+Random strings: `openssl rand -hex 32` (the script refuses to start while any
+value is still `change-me`).
 
-**MongoDB Atlas -> Network Access -> Add IP Address -> the VPS IPv4.**
+**MongoDB Atlas -> Network Access -> Add IP Address -> `62.72.23.1`.**
+
+What the 2nd run does with `PROXY=apache`:
+- starts only the `app` container, reachable only from the server at `127.0.0.1:8800`
+  (no Caddy, so the other websites on 80/443 are untouched);
+- enables Apache's `proxy`, `proxy_http`, `headers` modules;
+- writes `/etc/apache2/sites-available/netraai.itsybizz.com.conf` from
+  `deploy/apache-site.conf` (only if it doesn't exist yet), enables it, and reloads
+  Apache only if `apache2ctl configtest` passes.
+
+### HTTPS certificate (once)
+
+```bash
+apt install -y certbot python3-certbot-apache
+certbot --apache -d netraai.itsybizz.com
+```
+
+Choose "redirect" if asked. Certbot renews it automatically.
 
 ---
 
-## Part 6 - Check and connect the office PC
+## Part 5 - Check and connect the office PC
 
-- Open **https://survillance.itsybizz.com** (OfficeEye) and
-  **https://survillance.itsybizz.com/attendance/** (attendance).
-- Health check: `curl https://survillance.itsybizz.com/healthz`
+- Open **https://netraai.itsybizz.com** (OfficeEye) and
+  **https://netraai.itsybizz.com/attendance/** (attendance).
+- Health check: `curl https://netraai.itsybizz.com/healthz`
 - Office PC OfficeEye -> **Settings -> Cloud view**: server link
-  `https://survillance.itsybizz.com` and the same `OFFICEEYE_PUSH_TOKEN`.
+  `https://netraai.itsybizz.com` and the same `OFFICEEYE_PUSH_TOKEN`.
 
 Useful commands on the VPS (inside `/opt/survillance`):
 
 ```bash
-sudo docker compose ps               # are both containers up?
+sudo docker compose ps app           # is the app up?
 sudo docker compose logs -f app      # app logs
-sudo docker compose logs caddy       # HTTPS / certificate problems
-sudo docker compose restart          # restart
+curl -I http://127.0.0.1:8800/healthz   # app answers locally?
+tail -f /var/log/apache2/netraai.itsybizz.com-error.log
+sudo docker compose restart app      # restart
 ```
 
 **Updating later:** push from the PC (`git add -A; git commit -m "..."; git push`),
@@ -156,42 +145,11 @@ cd /opt/survillance && git pull && bash deploy/vps_install.sh
 
 ---
 
-## Part 7 - Only if ports 80/443 are already used on the VPS
+## On an empty server instead
 
-If the VPS already serves other sites with Nginx, don't run Caddy; let Nginx proxy
-the subdomain to the app instead.
-
-1. In `docker-compose.yml`, under `app:` replace `expose: - "8000"` with
-   ```yaml
-       ports:
-         - "127.0.0.1:8000:8000"
-   ```
-   and start only the app: `sudo docker compose up -d --build app`
-2. `/etc/nginx/sites-available/survillance.itsybizz.com`:
-   ```nginx
-   server {
-       server_name survillance.itsybizz.com;
-       client_max_body_size 50M;
-       location / {
-           proxy_pass http://127.0.0.1:8000;
-           proxy_set_header Host $host;
-           proxy_set_header X-Real-IP $remote_addr;
-           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-           proxy_set_header X-Forwarded-Proto $scheme;
-           proxy_http_version 1.1;
-           proxy_set_header Upgrade $http_upgrade;
-           proxy_set_header Connection "upgrade";
-           proxy_read_timeout 300;
-       }
-   }
-   ```
-3. Enable it and get HTTPS:
-   ```bash
-   ln -s /etc/nginx/sites-available/survillance.itsybizz.com /etc/nginx/sites-enabled/
-   nginx -t && systemctl reload nginx
-   apt install -y certbot python3-certbot-nginx
-   certbot --nginx -d survillance.itsybizz.com
-   ```
+With nothing on ports 80/443, set `PROXY=caddy` in `.env`: the script then also
+starts the project's Caddy container, which gets the HTTPS certificate by itself
+(no Apache, no certbot).
 
 ---
 
@@ -199,8 +157,11 @@ the subdomain to the app instead.
 
 | Problem | Fix |
 |---|---|
-| Browser shows certificate error | DNS wasn't pointing at the VPS when Caddy started: check `nslookup`, then `sudo docker compose restart caddy` |
-| Build killed / out of memory | Add the swap from Part 3, or a bigger VPS plan |
-| App starts but no data / login errors | `MONGO_URI` wrong, or VPS IP not allowed in Atlas Network Access |
-| `git clone` permission denied | Deploy key not added to the repo (Part 4) |
-| Site not reachable at all | Hostinger firewall / ufw must allow 80 and 443 |
+| `503 Service Unavailable` from Apache | App not up yet / crashed: `sudo docker compose logs app`, `curl -I http://127.0.0.1:8800/healthz` |
+| Shows one of the other websites | Apache site not enabled: `a2ensite netraai.itsybizz.com.conf && systemctl reload apache2`; check `apache2ctl -S` |
+| Certificate error | Run certbot (Part 4); DNS must point to 62.72.23.1 |
+| Live camera view stuck | `deploy/apache-site.conf` needs `flushpackets=on` on `ProxyPass` (it has it) - re-create the site file if it was edited |
+| "Port 8800 is already used" | Set `APP_PORT` to a free port in `.env`, and the same port in `/etc/apache2/sites-available/netraai.itsybizz.com.conf` |
+| Build killed / out of memory | Add the swap from Part 2 |
+| App starts but no data / login errors | `MONGO_URI` wrong, or 62.72.23.1 not allowed in Atlas Network Access |
+| `git clone` permission denied | Deploy key not added to the repo (Part 3) |
