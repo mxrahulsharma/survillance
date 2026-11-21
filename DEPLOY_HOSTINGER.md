@@ -15,11 +15,11 @@ Office PC (cameras)  --push-->  https://survillance.itsybizz.com  (VPS: Docker -
 
 ## Part 1 - Push the code to GitHub (on your Windows PC)
 
-1. On github.com: **New repository** -> name `OfficeEye` -> **Private** -> do NOT
-   add a README/.gitignore (the project has them) -> Create.
+1. Repository: `https://github.com/mxrahulsharma/survillance` (keep it **Private**:
+   Settings -> General -> Danger Zone -> Change visibility).
 2. In PowerShell, inside `D:\ai_project\OfficeEye`:
    ```powershell
-   git remote add origin https://github.com/<your-user>/OfficeEye.git
+   git remote add origin https://github.com/mxrahulsharma/survillance.git
    git branch -M main
    git push -u origin main
    ```
@@ -92,8 +92,8 @@ Copy the printed line -> GitHub repo -> **Settings -> Deploy keys -> Add deploy 
 
 ```bash
 cd /opt
-git clone git@github.com:<your-user>/OfficeEye.git
-cd OfficeEye
+git clone git@github.com:mxrahulsharma/survillance.git
+cd survillance
 ```
 
 ---
@@ -138,7 +138,7 @@ Make random strings on the VPS with: `openssl rand -hex 32`
 - Office PC OfficeEye -> **Settings -> Cloud view**: server link
   `https://survillance.itsybizz.com` and the same `OFFICEEYE_PUSH_TOKEN`.
 
-Useful commands on the VPS (inside `/opt/OfficeEye`):
+Useful commands on the VPS (inside `/opt/survillance`):
 
 ```bash
 sudo docker compose ps               # are both containers up?
@@ -151,7 +151,7 @@ sudo docker compose restart          # restart
 then on the VPS:
 
 ```bash
-cd /opt/OfficeEye && git pull && bash deploy/vps_install.sh
+cd /opt/survillance && git pull && bash deploy/vps_install.sh
 ```
 
 ---
