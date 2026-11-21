@@ -36,6 +36,7 @@ from urllib.parse import quote, urlencode
 from flask import Response, jsonify, redirect, render_template, request, session
 from werkzeug.security import safe_join
 
+from officeeye.core import access
 from officeeye.core import config
 from officeeye.models import events
 from officeeye.models import photos
@@ -47,6 +48,12 @@ MODE = (os.environ.get("OFFICEEYE_MODE")
         or ("cloud" if os.environ.get("RENDER") else "office")).lower()
 CLOUD = MODE == "cloud"
 PASSWORD = os.environ.get("OFFICEEYE_PASSWORD", "")
+# Optional second login on the server: OFFICEEYE_USER/OFFICEEYE_PASSWORD then
+# only look (View), and this one changes things too (Edit) - in OfficeEye
+# (relayed to the office PC) and in the attendance at /attendance. Without
+# it the one login does everything, as before.
+EDIT_USER = os.environ.get("OFFICEEYE_EDIT_USER", "editor")
+EDIT_PASSWORD = os.environ.get("OFFICEEYE_EDIT_PASSWORD", "")
 PUSH_TOKEN = os.environ.get("OFFICEEYE_PUSH_TOKEN", "")
 READ_ONLY = "This is the cloud view - change it on the office PC."
 # Read on the office PC, not here: a network scan, the office's photo folder.
@@ -257,15 +264,31 @@ def _login_key():
     """What a session is tied to: the host's password, or the one the office
     sent. A new password logs everybody out."""
     if PASSWORD:
-        return hashlib.sha256(("env:" + PASSWORD).encode()).hexdigest()[:16]
+        return hashlib.sha256(("env:" + PASSWORD + "|" + EDIT_PASSWORD).encode()).hexdigest()[:16]
     with store.lock:
         return store.login[1][:16] if store.login else None
+
+
+def edit_login_on():
+    """The server has a separate edit login (OFFICEEYE_EDIT_PASSWORD)."""
+    return bool(PASSWORD and EDIT_PASSWORD)
+
 
 def signed_in():
     """In a request to the cloud view: is this browser logged in? (Attendance
     at /attendance lets the same person in without a second login.)"""
     key = _login_key()
     return bool(key) and session.get("in") == key
+
+
+def role():
+    """This browser on the cloud view: access.EDIT, access.VIEW or None (not
+    logged in). Without a separate edit login, the one login is EDIT."""
+    if not signed_in():
+        return None
+    if not edit_login_on():
+        return access.EDIT
+    return access.EDIT if session.get("role") == access.EDIT else access.VIEW
 
 
 _failures = {}             # ip -> [times of wrong passwords]
@@ -318,6 +341,15 @@ def _install_cloud(app):
                       SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                       PERMANENT_SESSION_LIFETIME=timedelta(days=30),
                       MAX_CONTENT_LENGTH=32 * 1024 * 1024)
+    if EDIT_PASSWORD and EDIT_PASSWORD == PASSWORD:
+        log.warning("OFFICEEYE_EDIT_PASSWORD is the same as OFFICEEYE_PASSWORD - "
+                    "the view login can change things too")
+
+    @app.context_processor
+    def _login_state():
+        # the sidebar: "View only - Log in to edit", or "Edit login"
+        on = edit_login_on()
+        return {"login_on": on, "login_role": role() if on else None}
 
     @app.before_request
     def _gate():
@@ -335,6 +367,10 @@ def _install_cloud(app):
             if p.startswith(("/api/", "/frame/", "/snapshot/", "/live/", "/photos/")):
                 return jsonify({"ok": False, "message": "Log in first"}), 401
             return redirect("/login?next=" + quote(request.full_path.rstrip("?")))
+        if request.method not in ("GET", "HEAD") and role() == access.VIEW and \
+                not p.startswith(access.VIEW_POSTS):
+            # the view login: a change asks for the edit login first
+            return access.refusal("edit", request.environ, request.full_path.rstrip("?"))
         if p.startswith("/api/") and not p.startswith("/api/cloud/") and \
                 (request.method not in ("GET", "HEAD") or p in RELAY_GET):
             return _relay()                     # made on the office PC
@@ -377,33 +413,44 @@ def _install_cloud(app):
         if not key:
             return Response(NO_PASSWORD, 503, mimetype="text/html")
         error = ""
+        want_edit = bool(request.values.get("edit")) and edit_login_on()
         if request.method == "POST":
             ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
             now = time.time()
             recent = [t for t in _failures.get(ip, []) if now - t < 600]
             typed = request.form.get("password", "")
             user = request.form.get("username", "").strip().lower()
+            got = None                          # the edit login, else the view login
             if PASSWORD:
-                right = hmac.compare_digest(typed.encode(), PASSWORD.encode()) and \
-                    user == os.environ.get("OFFICEEYE_USER", "admin").lower()
+                if edit_login_on() and hmac.compare_digest(typed.encode(), EDIT_PASSWORD.encode()) and \
+                        hmac.compare_digest(user.encode(), EDIT_USER.lower().encode()):
+                    got = access.EDIT
+                elif hmac.compare_digest(typed.encode(), PASSWORD.encode()) and \
+                        hmac.compare_digest(user.encode(), os.environ.get("OFFICEEYE_USER", "admin").lower().encode()):
+                    got = access.VIEW if edit_login_on() else access.EDIT
             else:
                 with store.lock:
                     salt, want, name = store.login
-                right = hmac.compare_digest(_pw_hash(salt, typed), want) and \
-                    hmac.compare_digest(user.encode(), name.lower().encode())
+                if hmac.compare_digest(_pw_hash(salt, typed), want) and \
+                        hmac.compare_digest(user.encode(), name.lower().encode()):
+                    got = access.EDIT
             if len(recent) >= 10:
                 error = "Too many wrong passwords. Try again in a few minutes."
-            elif right:
+            elif got and want_edit and got == access.VIEW:
+                error = "That is the view login - use the edit username and password to change things."
+            elif got:
                 _failures.pop(ip, None)
                 session.clear()
                 session["in"] = key
+                session["role"] = got
                 session.permanent = True
                 return redirect(nxt)
             else:
                 time.sleep(1)
                 _failures[ip] = recent + [now]
-                error = "Wrong password."
-        return render_template("login.html", error=error, next=nxt)
+                error = "Wrong username or password."
+        return render_template("login.html", error=error, next=nxt,
+                               local_login=edit_login_on(), want_edit=want_edit)
 
     @app.get("/logout")
     def logout():

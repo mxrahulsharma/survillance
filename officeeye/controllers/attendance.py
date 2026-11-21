@@ -57,12 +57,20 @@ def mount(app):
     def guard(web):
         """The office PC's login in front of the attendance pages too: logged in
         first, and only the edit login changes anything (employees, entries,
-        requests, its settings)."""
+        requests, its settings). On the server with a separate edit login
+        (OFFICEEYE_EDIT_PASSWORD): somebody in OfficeEye with the view login
+        looks only; employees and API keys keep their own logins."""
         def guarded(environ, start_response):
-            if not cloud.CLOUD and access.enabled():
+            office = not cloud.CLOUD and access.enabled()
+            server = cloud.CLOUD and cloud.edit_login_on()
+            if office or server:
                 with app.request_context(environ):
                     path = environ.get("SCRIPT_NAME", "") + environ.get("PATH_INFO", "")
-                    why = access.check(environ, path)
+                    if office:
+                        why = access.check(environ, path)
+                    else:
+                        why = "edit" if cloud.role() == access.VIEW and \
+                            environ.get("REQUEST_METHOD", "GET") not in ("GET", "HEAD") else None
                     if why:
                         qs = environ.get("QUERY_STRING", "")
                         res = app.make_response(access.refusal(why, environ, path + ("?" + qs if qs else "")))

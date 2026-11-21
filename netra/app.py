@@ -114,11 +114,17 @@ def officeeye_admin():
     """Inside OfficeEye (netra.create_web_app): somebody OfficeEye already let
     in is the admin here - no second login. Never set when running on its own."""
     if not request.environ.get("netra.officeeye_admin"):
+        if session.get("via_officeeye"):
+            # admin only through OfficeEye's login, which has ended (logged out
+            # there, or the login changed): not the admin here any more either
+            session.clear()
         return None
     if not session.get("admin"):
         session.clear()
         session.permanent = True
         session["admin"] = True
+    if not session.get("via_officeeye"):
+        session["via_officeeye"] = True
     if request.endpoint == "login":
         return redirect(url_for("dashboard"))
     return None

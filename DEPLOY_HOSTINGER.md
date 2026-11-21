@@ -83,7 +83,9 @@ PROXY=apache
 APP_PORT=8800
 
 OFFICEEYE_USER=admin
-OFFICEEYE_PASSWORD=<strong password for the website>
+OFFICEEYE_PASSWORD=<view-only password for the website>
+OFFICEEYE_EDIT_USER=editor
+OFFICEEYE_EDIT_PASSWORD=<edit password - changes ask for it>
 OFFICEEYE_PUSH_TOKEN=<long random string - the office PC uses it>
 OFFICEEYE_SECRET=<long random string>
 

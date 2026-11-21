@@ -61,7 +61,7 @@
       <button class="sound" id="phone-alerts" type="button" hidden>Phone alerts: off</button>
       <div class="engine" id="engine">Detection: starting&hellip;</div>
       <div id="clock"></div>
-      {% if cloud_mode %}<a class="logout" href="/logout">Log out</a>{% endif %}
+      {% if cloud_mode and not login_on %}<a class="logout" href="/logout">Log out</a>{% endif %}
       {% if login_on %}
       <div class="who">
         {% if login_role == 'edit' %}<b>Edit login</b>
